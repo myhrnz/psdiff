@@ -3,8 +3,6 @@ import pylab as pl
 from scipy.stats import poisson
 from copy import copy
 
-# trying something new here...
-
 DEGTORAD = np.pi/180.
 LETTERS = ('e','d','r','b','a','s','f')
 NAMES = ('evolution_param','local_src_density','bin_radius_deg','sig_to_bkg','diff_events','catalog_srcs_in_fov','field_of_view')
@@ -169,8 +167,9 @@ class Analysis:
 
   def binned_stacked_search(self):
     p_value = 1
-    events_in_bins = sum(self.bin_realization.events)
-    mean_nonsig_in_bins = sum(self.bin_realization.mean_nonsig)
+    # the summing over bins is done here
+    events_in_bins = sum(self.bin_realization.events) # sum(self.bin_realization.events[:num_bins])
+    mean_nonsig_in_bins = sum(self.bin_realization.mean_nonsig) # sum(self.bin_realization.mean_nonsig[:num_bins]
     pdf = poisson(mean_nonsig_in_bins)
     if events_in_bins >=1:
       p_value = 1 - pdf.cdf(events_in_bins - 1)
