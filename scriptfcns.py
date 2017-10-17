@@ -20,19 +20,6 @@ def label(letter,log,inv):
     label = option(letter,LABELS)
   return label
 
-def create_ys(params,xdata,t_settings): 
-    import copy
-    curr_params = copy.copy(params)
-    xval,xout = xdata.values()
-    
-    ys = []
-    for x in xval:
-        curr_params.change(xdata.name(),x)
-        analyses = Analyses(curr_params,t.num_trials)
-        p_values = np.array(analyses.p_values())
-        ys.append(stat_repr(p_values,t_settings))
-    return ys
-
 class Trial_Settings:
   def __init__(self,
                num_trials = 100,
@@ -52,20 +39,9 @@ class Trial_Settings:
                   "\n\tchoice:" + self.choice + "\n"
     return rep
 
-def threshold_crossed(params,t_settings):
-    if t_settings.choice == "fraction":
-        analyses = Analyses(params, t_settings.num_trials)
-        values = np.array(analyses.p_values())
-        test_var = stat_repr(values,t_settings)
-        if test_var > t_settings.fraction:
-            return True
-
-def stat_repr(values,t_settings):
-    if t_settings.choice == 'fraction':
-        msk = (values < t_settings.p_threshold)
-        return float(len(values[msk]))/float(len(values))
-
 class Data(object):
+  """ A Data object stores a left endpoint, right endpoint and a stepsize. 
+  If the left endpoint is greater than its right endpoint, reverse is automatically set to true when the object is created. """
   def __init__(self, left, right, step):
     self.left = left
     self.right = right
@@ -76,6 +52,9 @@ class Data(object):
       self.reversed = False
     
   def bare_values(self):
+    """ bare_values calculates the np.array with values that correspond directly to left/right endpoint and stepsize. 
+    It returns this array together with what would be the next value in the list, as seen from the right endpoint. 
+    For example, if the Data object is reversed and hence right endpoint < left endpoint, then outside is right endpoint - stepsize. """
     if self.reversed:
       values = np.arange(self.right,self.left+self.step/2.,self.step)
       values = values[::-1]
@@ -86,18 +65,22 @@ class Data(object):
     return (values,outside) # outside can be used in contour plot generation
   
   def pow_values(self):
+    """ pow_values returns the power (base 10) of the np.array and the outside value returned by bare_values(). """
     values = self.bare_values()
     return (pow(10.,values[0]),pow(10.,values[1]))
   
   def log_values(self):
+    """ pow_values returns the logarithm (base 10) of the np.array and the outside value returned by bare_values(). """
     values = self.bare_values()
     return (np.log10(values[0]),np.log10(values[1]))
   
   def inv_values(self):
+    """ pow_values returns the inverse of the np.array and the outside value returned by bare_values(). """
     values = self.bare_values()
     return ((1./values[0]),(1./values[1]))
 
   def reverse(self):
+    """ Put left endpoint as right endpoint and right endpoint as left endpoint and set reversed to True. """
     self.left = self.right
     self.right = self.left
     self.reversed ^= True
@@ -130,13 +113,16 @@ class Plot_Data(Data):
   def plot_values(self):
     values,outside= super(Plot_Data, self).bare_values()
     return values
+  
+###################################################################################
+# everthing below needs to be adjusted
 
+# make a new version of z_req that reads loaded data instead of generating new data
 def z_req(params,
           xdata,
           ydata,
           zdata,
-          t_settings,
-          verbose = False):
+          t_settings):
     
     xval,xout = xdata.values()
     yval,yout = ydata.values()
@@ -146,26 +132,16 @@ def z_req(params,
     
     for y in np.arange(len(yval)):
         params.change(ydata.name(),yval[y])
-        if verbose:
-            print(ydata.name() + ": " + str(yval[y]))
         
         for x in np.arange(len(xval)):
             params.change(xdata.name(),xval[x])
-            if verbose:
-                print("\t" + xdata.name() + ": " + str(xval[x]))
             
             for z in np.arange(len(zval)):
                 params.change(zdata.name(),zval[z])
-                if verbose:
-                    print("\t\t" + zdata.name() + ": " + str(zval[z]))
                 z_req[y][x] = zval[z]
-                if threshold_crossed(params,t_settings):
-                    if verbose:
-                        print("\t\t\t" + "Threshold crossed at " + zdata.name() + ": " + str(zval[z]) )
-                    break
+                if threshold_crossed(t_settings=t_settings,params=params):
+                  break
             else:
-                if verbose:
-                    print("\t\t\tThrehold not crossed!")
                 z_req[y][x] = zout
     if zdata.log:
         return np.log10(z_req)
@@ -175,3 +151,54 @@ def z_req(params,
       return 1./z_req
     else: 
       return z_req
+
+def threshold_crossed(t_settings,params):
+    if t_settings.choice == "fraction":
+        analyses = Analyses(params, t_settings.num_trials)
+        values = np.array(analyses.p_values())
+        test_var = stat_repr(values,t_settings)
+        if test_var > t_settings.fraction:
+          return True
+
+def stat_repr(values,t_settings):
+    if t_settings.choice == 'fraction':
+        msk = (values < t_settings.p_threshold)
+        return float(len(values[msk]))/float(len(values))
+
+##############################################################################
+# experimental function binned_stacked_search() and analyze_bin_realizations()
+def binned_stacked_search(bin_realization, num_bins):
+  """ Performs a binned_stacked_search on the num_bins closest sources in the bin_realization """
+  if (bin_realization.detector.catalog_srcs_in_fov >= num_bins):
+    p_value = 1
+    # the summing over bins is done here
+    events_in_bins = sum(bin_realization.events[:num_bins])
+    mean_nonsig_in_bins = sum(bin_realization.mean_nonsig[:num_bins])
+    pdf = poisson(mean_nonsig_in_bins)
+    if events_in_bins >=1:
+      p_value = 1 - pdf.cdf(events_in_bins - 1)
+    return p_value
+  else:
+    print("Not enough sources in chosen bin_realization")
+    
+def analyze_bin_realizations(bin_realizations, num_bins):
+  p_values = []
+  for br in bin_realizations.bins:
+    p_value = binned_stacked_search(br,num_bins)
+    p_values.append(p_value)
+  return p_values
+###############################################################################
+
+# this function is not used yet...
+#def create_ys(params,xdata,t_settings): 
+    #import copy
+    #curr_params = copy.copy(params)
+    #xval,xout = xdata.values()
+    
+    #ys = []
+    #for x in xval:
+        #curr_params.change(xdata.name(),x)
+        #analyses = Analyses(curr_params,t.num_trials)
+        #p_values = np.array(analyses.p_values())
+        #ys.append(stat_repr(p_values,t_settings))
+    #return ys
